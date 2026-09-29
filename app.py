@@ -10,6 +10,7 @@ from tools.charts import make_chart
 from tools.clean import clean_data, health_label, health_score
 from tools.demo import DEFAULT_TARGET, DEMOS, load_demo
 from tools.eda import quick_eda
+from tools.guardrails import check_user_input
 from tools.ml import train_model
 from tools.rag import DocIndex, extract_text
 from tools.report import build_report
@@ -178,7 +179,10 @@ with t5:
     S.pending = None
     if q:
         S.chat.append({"role": "user", "text": q})
-        if not (api_key or os.getenv("GEMINI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")):
+        safe, block_msg = check_user_input(q)
+        if not safe:
+            S.chat.append({"role": "assistant", "text": "🛡️ " + block_msg})
+        elif not (api_key or os.getenv("GEMINI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")):
             S.chat.append({"role": "assistant", "text": "Please paste your API key in the sidebar first (free Gemini keys: aistudio.google.com/apikey)."})
         else:
             with st.spinner("Thinking..."):
