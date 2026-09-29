@@ -22,3 +22,4 @@ fig, msg = make_chart(df, "bar", "Sex", "Survived"); assert fig is not None
 assert make_chart(df, "bar", "Nope")[0] is None; print("charts ok")
 idx = DocIndex(); idx.add("policy.txt", open("sample_data/company_policy.txt").read())
 assert idx.search("how many days annual leave") and not idx.search("quantum chromodynamics"); print("RAG + abstention ok")
+err = train_model(df, "Cabin"); assert "error" in err; print("bad-target message ok")

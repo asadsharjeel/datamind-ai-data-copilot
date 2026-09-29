@@ -19,7 +19,7 @@ def train_model(df: pd.DataFrame, target: str) -> dict:
     y = data[target]
 
     dropped = [c for c in X.columns
-               if X[c].isna().mean() > 0.6 or (X[c].dtype == object and X[c].nunique() > 50)
+               if X[c].isna().mean() > 0.6 or (not pd.api.types.is_numeric_dtype(X[c]) and X[c].nunique() > 50)
                or X[c].nunique() == len(X)]
     X = X.drop(columns=dropped)
     num = X.select_dtypes(include="number").columns.tolist()
@@ -31,7 +31,7 @@ def train_model(df: pd.DataFrame, target: str) -> dict:
                           ("oh", OneHotEncoder(handle_unknown="ignore"))]), cat),
     ])
 
-    is_class = y.dtype == object or y.nunique() <= 10
+    is_class = (not pd.api.types.is_numeric_dtype(y)) or y.nunique() <= 10
     if is_class:
         task, scoring = "classification", "accuracy"
         models = {"Logistic Regression": LogisticRegression(max_iter=1000),
@@ -39,6 +39,11 @@ def train_model(df: pd.DataFrame, target: str) -> dict:
     else:
         task, scoring = "regression", "r2"
         models = {"Ridge": Ridge(), "Random Forest": RandomForestRegressor(n_estimators=150, random_state=42)}
+
+    if not pd.api.types.is_numeric_dtype(y) and y.nunique() > 20:
+        return {"error": f"'{target}' has {y.nunique()} different text values, so it can't be predicted as a category. Pick a numeric column or one with few categories."}
+    if is_class and y.value_counts().min() < 5:
+        return {"error": f"'{target}' has categories with fewer than 5 rows. Pick a different column to predict."}
 
     X_tr, X_te, y_tr, y_te = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y if is_class else None)
@@ -57,6 +62,6 @@ def train_model(df: pd.DataFrame, target: str) -> dict:
     return {
         "task": task, "metric": scoring, "cv_scores": {k: round(v, 3) for k, v in scores.items()},
         "best_model": best, "test_score": round(test_score, 3),
-        "dropped_columns": dropped, "feature_importance": importance.to_dict(),
+        "dropped_columns": dropped, "features": list(X.columns), "feature_importance": importance.to_dict(),
         "model": final,
     }

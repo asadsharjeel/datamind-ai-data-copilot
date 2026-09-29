@@ -3,6 +3,12 @@
 Upload any CSV/Excel file (and optional PDFs) and get automatic EDA, one-click AutoML with explainability,
 and a chat agent that writes safe pandas code, draws charts, trains models and answers from documents.
 
+## Features
+- One-click demo datasets, data health score (0-100), interactive Plotly charts and correlation heatmap
+- Chart builder, data-cleaning tab (drop / fill / dedupe) with CSV download and reset
+- AutoML with model comparison, feature importance and a what-if predictor
+- Chat agent (Claude tool calling) with suggested questions, plus downloadable HTML report
+
 ## Architecture
 ```
 Streamlit UI -> Agent loop (LLM tool calling) -> Guardrails
