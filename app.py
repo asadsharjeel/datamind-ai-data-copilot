@@ -34,7 +34,10 @@ for k, v in {"df": None, "orig": None, "name": "", "ml": None, "chat": [], "pend
 
 with st.sidebar:
     st.header("⚙️ Setup")
-    api_key = st.text_input("Anthropic API key (chat tab only)", type="password")
+    provider = st.selectbox("Chat AI provider", ["Gemini (free)", "Claude"])
+    api_key = st.text_input(f"{provider.split()[0]} API key (chat tab only)", type="password")
+    model = st.text_input("Model", value="gemini-3.5-flash-lite" if provider.startswith("Gemini") else "claude-sonnet-4-6",
+                          key=f"model_{provider}")
     st.subheader("Try a demo")
     demo = st.selectbox("Demo dataset", list(DEMOS), label_visibility="collapsed")
     if st.button("Load demo", width="stretch"):
@@ -155,7 +158,7 @@ with t4:
                     st.bar_chart(pd.Series(pr, index=[str(c) for c in mdl.classes_]))
 
 with t5:
-    st.caption("Needs your Anthropic API key in the sidebar. Everything else works without one.")
+    st.caption("Needs a free Gemini API key (or a Claude key) in the sidebar. Everything else works without one.")
     for m in S.chat:
         with st.chat_message(m["role"]):
             st.write(m["text"])
@@ -175,16 +178,21 @@ with t5:
     S.pending = None
     if q:
         S.chat.append({"role": "user", "text": q})
-        if not (api_key or os.getenv("ANTHROPIC_API_KEY")):
-            S.chat.append({"role": "assistant", "text": "Please add your Anthropic API key in the sidebar first."})
+        if not (api_key or os.getenv("GEMINI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")):
+            S.chat.append({"role": "assistant", "text": "Please paste your API key in the sidebar first (free Gemini keys: aistudio.google.com/apikey)."})
         else:
             with st.spinner("Thinking..."):
                 try:
-                    o = ask(q, df, index, api_key=api_key)
+                    o = ask(q, df, index, api_key=api_key, provider=provider, model=model)
                     S.chat.append({"role": "assistant", "text": o["answer"], "figs": o["figures"],
                                    "code": "\n\n".join(o["code_trace"])})
                 except Exception as e:
-                    S.chat.append({"role": "assistant", "text": f"Error: {e}"})
+                    msg = str(e)
+                    if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                        msg = "Free-tier limit reached. Wait a minute and try again, or come back tomorrow."
+                    elif "404" in msg or "NOT_FOUND" in msg:
+                        msg = "That model name isn't available. Change the Model box in the sidebar."
+                    S.chat.append({"role": "assistant", "text": f"Error: {msg}"})
         st.rerun()
 
 with t6:

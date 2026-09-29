@@ -3,5 +3,6 @@ pandas
 numpy
 plotly
 scikit-learn
+google-genai
 anthropic
 pypdf

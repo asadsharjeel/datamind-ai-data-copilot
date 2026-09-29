@@ -2,7 +2,6 @@
 import json
 import os
 
-import anthropic
 
 from tools.analysis import run_pandas
 from tools.charts import make_chart
@@ -10,7 +9,8 @@ from tools.eda import quick_eda
 from tools.guardrails import check_user_input
 from tools.ml import train_model
 
-MODEL = os.getenv("DATAMIND_MODEL", "claude-sonnet-4-6")
+CLAUDE_MODEL = "claude-sonnet-4-6"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 MAX_STEPS = 6
 
 SYSTEM = """You are DataMind, a careful data-science assistant.
@@ -66,20 +66,54 @@ def run_tool(name, args, df, index, figures, trace):
     return {"error": f"Unknown tool {name}"}
 
 
-def ask(question, df, index=None, history=None, api_key=None):
-    """Returns dict(answer, figures, code_trace, tool_calls)."""
+def _blocked(question):
     ok, msg = check_user_input(question)
-    if not ok:
-        return {"answer": msg, "figures": [], "code_trace": [], "tool_calls": []}
+    return None if ok else {"answer": msg, "figures": [], "code_trace": [], "tool_calls": []}
+
+
+def _schema(df):
+    return f"Dataset columns and types: {df.dtypes.astype(str).to_dict()}. Rows: {len(df)}."
+
+
+def _ask_gemini(question, df, index, api_key, model):
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=api_key or os.getenv("GEMINI_API_KEY"))
+    decls = [types.FunctionDeclaration(name=t["name"], description=t["description"],
+                                       parameters_json_schema=t["input_schema"]) for t in TOOLS]
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM + "\n" + _schema(df),
+        tools=[types.Tool(function_declarations=decls)],
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True))
+    contents = [types.Content(role="user", parts=[types.Part(text=question)])]
+    figures, trace, calls = [], [], []
+    for _ in range(MAX_STEPS):
+        resp = client.models.generate_content(model=model or GEMINI_MODEL, contents=contents, config=config)
+        fcs = resp.function_calls or []
+        if not fcs:
+            return {"answer": resp.text or "", "figures": figures, "code_trace": trace, "tool_calls": calls}
+        contents.append(resp.candidates[0].content)  # keeps Gemini's thought signatures intact
+        parts = []
+        for fc in fcs:
+            calls.append(fc.name)
+            out = run_tool(fc.name, dict(fc.args or {}), df, index, figures, trace)
+            parts.append(types.Part.from_function_response(
+                name=fc.name, response={"result": json.loads(json.dumps(out, default=str))}))
+        contents.append(types.Content(role="user", parts=parts))
+    return {"answer": "I couldn't finish within the step limit. Try a simpler question.",
+            "figures": figures, "code_trace": trace, "tool_calls": calls}
+
+
+def _ask_claude(question, df, index, api_key, model):
+    import anthropic
 
     client = anthropic.Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
-    schema = f"Dataset columns and types: {df.dtypes.astype(str).to_dict()}. Rows: {len(df)}."
-    messages = (history or []) + [{"role": "user", "content": question}]
+    messages = [{"role": "user", "content": question}]
     figures, trace, calls = [], [], []
-
     for _ in range(MAX_STEPS):
-        resp = client.messages.create(model=MODEL, max_tokens=1500,
-                                      system=SYSTEM + "\n" + schema, tools=TOOLS, messages=messages)
+        resp = client.messages.create(model=model or CLAUDE_MODEL, max_tokens=1500,
+                                      system=SYSTEM + "\n" + _schema(df), tools=TOOLS, messages=messages)
         if resp.stop_reason != "tool_use":
             text = "".join(b.text for b in resp.content if b.type == "text")
             return {"answer": text, "figures": figures, "code_trace": trace, "tool_calls": calls}
@@ -94,3 +128,12 @@ def ask(question, df, index=None, history=None, api_key=None):
         messages.append({"role": "user", "content": results})
     return {"answer": "I couldn't finish within the step limit. Try a simpler question.",
             "figures": figures, "code_trace": trace, "tool_calls": calls}
+
+
+def ask(question, df, index=None, api_key=None, provider="Gemini", model=None):
+    """Returns dict(answer, figures, code_trace, tool_calls). provider: 'Gemini' or 'Claude'."""
+    blocked = _blocked(question)
+    if blocked:
+        return blocked
+    fn = _ask_claude if provider.lower().startswith("claude") else _ask_gemini
+    return fn(question, df, index, api_key, model)
